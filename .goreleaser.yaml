@@ -1,0 +1,62 @@
+version: 2
+
+project_name: letopis
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: letopis
+    main: ./cmd/letopis
+    binary: letopis
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Windows on arm64 is niche enough to skip; add it back if it's ever needed.
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/max-trifonov/letopis/internal/version.Version={{.Version}}
+      - -X github.com/max-trifonov/letopis/internal/version.Commit={{.Commit}}
+      - -X github.com/max-trifonov/letopis/internal/version.Date={{.Date}}
+
+# Every archive gets the binary plus everything needed to run it standalone:
+# a config template and a compose file for MongoDB/Redis, for users who don't
+# already have them. LICENSE/NOTICE are required by Apache-2.0 §4 when
+# redistributing a binary.
+archives:
+  - id: letopis
+    ids: [letopis]
+    formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - NOTICE
+      - config.example.yaml
+      - docker-compose.deps.yml
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  github:
+    owner: max-trifonov
+    name: letopis
+  prerelease: auto

@@ -12,7 +12,8 @@ IMAGE ?= ghcr.io/max-trifonov/letopis
 LOAD_COMPOSE := docker compose -f test/load/docker-compose.load.yml
 
 .PHONY: build run test test-integration bench lint proto tidy docker \
-	load-up load-down load-durable load-fast load-strict load-overload
+	load-up load-down load-durable load-fast load-strict load-overload \
+	release-snapshot
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/letopis ./cmd/letopis
@@ -68,3 +69,9 @@ docker:
 		--build-arg COMMIT=$(COMMIT) \
 		--build-arg DATE=$(DATE) \
 		-t $(IMAGE):$(VERSION) -t $(IMAGE):latest .
+
+# Builds release archives for all OS/arch targets locally without publishing
+# (requires goreleaser: https://goreleaser.com/install/). Output in dist/.
+# The real release runs the same config in CI on every `vX.Y.Z` tag push.
+release-snapshot:
+	goreleaser release --snapshot --clean

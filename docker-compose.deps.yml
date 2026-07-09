@@ -1,0 +1,43 @@
+# Infrastructure-only stack: MongoDB + Redis, nothing else.
+#
+# For running the `letopis` binary directly (from a release archive or
+# `make build`) against local dependencies instead of your own MongoDB/Redis:
+#
+#   docker compose -f docker-compose.deps.yml up -d
+#   ./letopis serve --config config.yaml
+#
+# Exposes the default ports config.example.yaml already points at
+# (mongodb://localhost:27017, localhost:6379). If you have your own
+# MongoDB/Redis, skip this file entirely and point config.yaml at them.
+
+services:
+  mongodb:
+    image: mongo:${MONGO_VERSION:-7}
+    restart: unless-stopped
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:${REDIS_VERSION:-7-alpine}
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  mongo-data:
+  redis-data:
