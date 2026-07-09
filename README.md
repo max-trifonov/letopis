@@ -32,6 +32,8 @@ Most databases store only the latest state. Letopis stores *every* change — wh
 
 **Prerequisites:** Go 1.25+, MongoDB 7+, Redis 6+.
 
+Grab a prebuilt binary from [Releases](https://github.com/max-trifonov/letopis/releases) (linux/darwin/windows, amd64/arm64), or build from source:
+
 ```sh
 git clone https://github.com/max-trifonov/letopis.git
 cd letopis

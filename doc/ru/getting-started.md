@@ -13,7 +13,13 @@
 
 ---
 
-## Установка из исходников
+## Установка
+
+### Готовые бинари
+
+Скачайте архив под свою платформу (linux/darwin/windows, amd64/arm64) со страницы [GitHub Releases](https://github.com/max-trifonov/letopis/releases). В архиве — бинарь `letopis`, `LICENSE`, `NOTICE`, `config.example.yaml` и `docker-compose.deps.yml`.
+
+### Из исходников
 
 ```sh
 git clone https://github.com/max-trifonov/letopis.git

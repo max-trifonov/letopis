@@ -13,7 +13,13 @@ This guide covers installation, configuration, and running your first Letopis in
 
 ---
 
-## Install from source
+## Install
+
+### Prebuilt binaries
+
+Download an archive for your platform (linux/darwin/windows, amd64/arm64) from [GitHub Releases](https://github.com/max-trifonov/letopis/releases). Each archive bundles the `letopis` binary with `LICENSE`, `NOTICE`, `config.example.yaml`, and `docker-compose.deps.yml`.
+
+### From source
 
 ```sh
 git clone https://github.com/max-trifonov/letopis.git
