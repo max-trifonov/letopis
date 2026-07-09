@@ -119,8 +119,16 @@ Both servers support TLS; set `server.http.tls` / `server.grpc.tls` in the confi
 | [Write API](doc/write-api.md) | Ingest state/diff/delete, batch, idempotency, tickets |
 | [Read API](doc/read-api.md) | History, current state, point-in-time reconstruction, collections, flows |
 | [Admin API](doc/admin-api.md) | Collection config, rules, webhooks, dead-letter queue |
+| [Client SDKs](doc/sdks.md) | Official Laravel and Node.js SDKs |
 
 Russian: [doc/ru/](doc/ru/)
+
+## Client SDKs
+
+| SDK | Stack | Package |
+|---|---|---|
+| [letopis-laravel-sdk](https://github.com/max-trifonov/letopis-laravel-sdk) | PHP 8.2+ / Laravel 11-12 | `letopis/laravel-sdk` (Packagist) |
+| [letopis-node-sdk](https://github.com/max-trifonov/letopis-node-sdk) | Node.js 18+ / TypeScript | `letopis-node` (npm) |
 
 OpenAPI 3.1 spec: [`api/openapi/letopis.v1.yaml`](api/openapi/letopis.v1.yaml)
 

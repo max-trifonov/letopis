@@ -7,6 +7,7 @@
 | [Write API](write-api.md) | Ingest state/diff/delete, batch, idempotency, tickets |
 | [Read API](read-api.md) | History, current state, point-in-time reconstruction, collections, flows |
 | [Admin API](admin-api.md) | Collection config, rules, webhooks, dead-letter queue |
+| [Client SDKs](sdks.md) | Official Laravel and Node.js SDKs |
 
 Russian: [doc/ru/](ru/README.md)
 

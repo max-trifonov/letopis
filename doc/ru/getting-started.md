@@ -242,9 +242,24 @@ server:
 
 ---
 
+## Клиентские SDK
+
+Если ваше приложение на PHP/Laravel или Node.js/TypeScript, не собирайте HTTP-запросы
+вручную — используйте официальный SDK:
+
+```bash
+composer require letopis/laravel-sdk   # Laravel 11/12
+npm install letopis-node               # Node.js 18+
+```
+
+Подробнее: [Клиентские SDK](sdks.md).
+
+---
+
 ## Дальнейшие шаги
 
 - [Концепции](concepts.md) — коллекции, режимы надёжности, мультитенантность
 - [API записи](write-api.md) — приём событий
 - [API чтения](read-api.md) — запросы истории и point-in-time реконструкция
 - [Admin API](admin-api.md) — конфигурация коллекций, правила и вебхуки
+- [Клиентские SDK](sdks.md) — официальные Laravel и Node.js SDK

@@ -244,9 +244,24 @@ Prometheus metrics include queue depth, consumer lag, ingest rates per tenant an
 
 ---
 
+## Client SDKs
+
+If your application is PHP/Laravel or Node.js/TypeScript, skip hand-rolled HTTP calls
+and use an official SDK instead:
+
+```bash
+composer require letopis/laravel-sdk   # Laravel 11/12
+npm install letopis-node               # Node.js 18+
+```
+
+See [Client SDKs](sdks.md) for setup and usage.
+
+---
+
 ## Next steps
 
 - [Concepts](concepts.md) — understand collections, reliability modes, and multi-tenancy
 - [Write API](write-api.md) — start ingesting events
 - [Read API](read-api.md) — query history and reconstruct past states
 - [Admin API](admin-api.md) — configure collections, rules, and webhooks
+- [Client SDKs](sdks.md) — official Laravel and Node.js SDKs
