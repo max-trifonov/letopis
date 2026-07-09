@@ -1,0 +1,101 @@
+# Letopis instance configuration.
+#
+# The binary looks for config.yaml in the working directory, then next
+# to itself; --config overrides both. Environment variables override the
+# file: LETOPIS_ROLE, LETOPIS_HTTP_ADDR, LETOPIS_GRPC_ADDR,
+# LETOPIS_MONGODB_URI, LETOPIS_REDIS_ADDR, LETOPIS_REDIS_PASSWORD,
+# LETOPIS_REDIS_DB, LETOPIS_LOG_LEVEL.
+
+# api — HTTP/gRPC only; worker — pipeline only; all — both in one process.
+role: all
+
+server:
+  http:
+    addr: ":8080"
+    tls:
+      enabled: false
+      cert_file: ""
+      key_file: ""
+  grpc:
+    addr: ":9090"
+    tls:
+      enabled: false
+      cert_file: ""
+      key_file: ""
+
+# Default cluster. Tenants may point at their own cluster individually
+# in the tenant config (multi-tenancy lands in stage 1).
+mongodb:
+  uri: "mongodb://localhost:27017"
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+
+# Event pipeline (ADR-003). The memory driver runs in-process and is only
+# valid for role=all; redis-streams (the default) works across api/worker
+# processes. Shards partition events for ordering — one shard, one stream,
+# one worker goroutine; changing the count on a live queue needs a drain.
+queue:
+  driver: redis-streams        # memory | redis-streams
+  shards: 16
+  stream_prefix: "letopis:ingest"
+  consumer_group: "workers"
+
+# Rules engine (S4-04, FR-4.5). Rules are evaluated after a write commits and
+# never slow ingest. Compiled rules are cached per collection; a CRUD change is
+# broadcast over Redis pub/sub and dropped at once. Without Redis the cache TTL
+# below bounds how stale a rule change can be.
+rules:
+  cache_ttl_seconds: 30   # 0 = default (30s)
+
+# Webhook delivery (S4-05, FR-4.3/4.4). Fired webhook actions go through a
+# separate durable queue, signed with HMAC-SHA256 and retried with exponential
+# backoff before landing in the DLQ. Secrets live here, not in the rules store:
+# a rule references a secret by ref.
+webhooks:
+  default_timeout_ms: 5000   # per-attempt timeout when a rule sets none; 0 = default
+  max_attempts: 5            # retries before the DLQ when a rule sets none; 0 = default
+  backoff:
+    base_ms: 500             # first retry delay; doubles each attempt; 0 = default
+    max_ms: 30000            # cap on the backoff; 0 = default
+  delivery_shards: 0         # 0 = use the ingest queue's shard count
+  secrets:                   # secret_ref -> HMAC signing secret
+    whsec_default: "change-me-in-production"
+  ssrf:
+    # allow: []              # CIDRs always permitted (overrides deny), e.g. "192.168.100.0/24"
+    # deny: []               # extra CIDRs to block beyond the built-in denylist
+    allow_private: false     # set true only if webhook receivers live on your private network
+    allow_http: false        # set true only in dev; production must use https
+
+log:
+  level: info    # debug | info | warn | error
+  format: json   # json | text
+
+# Per-collection behaviour defaults (FR-6.1).
+collections:
+  # Provision an unknown collection on first write. Turn off to require
+  # explicit creation; a write to a missing collection then fails.
+  auto_create: true
+
+# Tenants and their API keys (FR-7.3, ADR-010). Until the admin API lands
+# this YAML is the only source. A tenant is isolated to its own MongoDB
+# database (hm_t_{id} on the default cluster unless overridden here). The
+# tenant is identified by the key, never by the URL.
+tenants:
+  - id: acme
+    # Optional: pin this tenant to its own cluster/database. Without it,
+    # data lives in hm_t_acme on the default cluster above.
+    database:
+      uri: ""    # e.g. "mongodb://acme-cluster:27017"
+      name: ""   # e.g. "acme_history"
+    keys:
+      # Preferred form: store only the SHA-256 of the key ("sha256:" + hex).
+      - key_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        scopes: [write, read]        # write | read | admin
+        collections: ["crm.*"]       # glob mask; "*" allows all
+      # Plaintext is accepted for dev only and logs a warning at startup.
+      - key: "hm_dev_plaintext"
+        scopes: [admin]
+        collections: ["*"]

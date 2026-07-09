@@ -1,0 +1,57 @@
+# Letopis configuration for the S2-07 load test.
+#
+# Single role=all process so one container exercises both the accept (API) and
+# the async pipeline (worker). The infrastructure addresses are injected by the
+# compose file via LETOPIS_* overrides, so this file stays host-agnostic.
+#
+# The write key below is plaintext on purpose — this stack is disposable and
+# never holds real data. The k6 scenarios send it as `Authorization: Bearer`.
+
+role: all
+
+server:
+  http:
+    addr: ":8080"
+  grpc:
+    addr: ":9090"
+
+mongodb:
+  uri: "mongodb://localhost:27017"
+
+redis:
+  addr: "localhost:6379"
+
+queue:
+  driver: redis-streams
+  shards: 16
+  stream_prefix: "letopis:ingest"
+  consumer_group: "workers"
+  batch_size: 500
+  batch_linger_ms: 50
+  # Backpressure threshold (NFR-2.3). Deliberately modest so the overload
+  # scenario can drive the queue past it and observe 429 + Retry-After without
+  # needing to saturate the host. Raise it for a pure-throughput run.
+  max_depth: 20000
+  retry_after_seconds: 1
+
+tickets:
+  ttl_hours: 24
+
+idempotency:
+  ttl_hours: 24
+
+log:
+  # info keeps the accept path off the hot logging path; the load run is not a
+  # debugging session.
+  level: warn
+  format: json
+
+collections:
+  auto_create: true
+
+tenants:
+  - id: loadtest
+    keys:
+      - key: "load_write_key"
+        scopes: [write, read]
+        collections: ["*"]

@@ -1,0 +1,11 @@
+# Codegen runs through `go tool`, so the plugin versions are pinned by
+# go.mod and nobody needs anything installed globally except buf itself.
+version: v2
+clean: true
+plugins:
+  - local: ["go", "tool", "protoc-gen-go"]
+    out: internal/gen
+    opt: paths=source_relative
+  - local: ["go", "tool", "protoc-gen-go-grpc"]
+    out: internal/gen
+    opt: paths=source_relative

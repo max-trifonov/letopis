@@ -1,0 +1,89 @@
+# Prometheus alerting rules for Letopis (S2-06, NFR-6.1/NFR-6.4).
+#
+# Starter rules over the queue/backpressure metrics: queue backlog, processing
+# lag, and publish failures. Thresholds are deployment-specific — tune them to
+# your queue.max_depth and NFR-1.6 lag target (p99 < 1s). A full Grafana
+# dashboard ships later (NFR-6.4); these rules are the minimum operable signal.
+groups:
+  - name: letopis-pipeline
+    rules:
+      # Backlog climbing toward the backpressure threshold: writes are arriving
+      # faster than the workers drain them, or MongoDB is degraded (NFR-4.2).
+      # Set the constant to ~80% of queue.max_depth.
+      - alert: LetopisQueueDepthHigh
+        expr: letopis_queue_depth > 8000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Letopis queue {{ $labels.queue }} backlog is high"
+          description: "queue_depth={{ $value }} for {{ $labels.queue }} over 2m; backpressure (429) trips at the configured max_depth."
+
+      # Processing lag past the NFR-1.6 target (p99 < 1s). Sustained lag means the
+      # async path is falling behind; scale workers or investigate Mongo.
+      - alert: LetopisConsumerLagHigh
+        expr: letopis_consumer_lag_seconds > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Letopis {{ $labels.queue }} processing lag above target"
+          description: "consumer_lag_seconds={{ $value }} for {{ $labels.queue }} over 5m; NFR-1.6 target is p99 < 1s."
+
+      # Any sustained enqueue failures: the durable backbone (Redis) is unreachable
+      # and strict/durable accepts are being refused (NFR-4.2).
+      - alert: LetopisQueuePublishErrors
+        expr: rate(letopis_queue_publish_errors_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Letopis queue {{ $labels.queue }} publish errors"
+          description: "Enqueue is failing for {{ $labels.queue }} (Redis down or saturated); async writes cannot be accepted."
+
+      # Backpressure actively shedding load: clients are getting 429s. Expected as a
+      # safety valve under a spike, but a sustained rate means under-provisioning.
+      - alert: LetopisBackpressureActive
+        expr: rate(letopis_ingest_backpressure_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Letopis is shedding writes with 429 ({{ $labels.queue }})"
+          description: "Backpressure has been refusing async writes for {{ $labels.queue }} over 5m; scale workers or raise queue.max_depth."
+
+  - name: letopis-delivery
+    rules:
+      # Webhook DLQ growing: deliveries are exhausting their retries. Indicates a
+      # persistently unreachable receiver or a bad secret_ref. Review the DLQ via
+      # GET /collections/{c}/rules/{ruleId}/dlq and redeliver after the fix.
+      - alert: LetopisDLQGrowing
+        expr: increase(letopis_webhook_dlq_size[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Letopis webhook DLQ is growing"
+          description: "webhook_dlq_size has been increasing for 5m; webhook receivers may be down or secret_refs misconfigured."
+
+      # Sustained webhook delivery failures: the dispatcher is receiving errors on
+      # most attempts. Distinguish from a burst by the 10m window.
+      - alert: LetopisWebhookDeliveryFailureHigh
+        expr: rate(letopis_webhook_deliveries_total{result="failed"}[10m]) > rate(letopis_webhook_deliveries_total{result="delivered"}[10m])
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Letopis webhook delivery failure rate exceeds success rate"
+          description: "More deliveries are failing than succeeding over 10m; check receiver availability and DLQ entries."
+
+      # SSRF blocks are configuration errors (a rule URL targets a private address).
+      # Any non-zero rate after initial deployment warrants investigation.
+      - alert: LetopisWebhookSSRFBlocked
+        expr: rate(letopis_webhook_deliveries_total{result="blocked"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Letopis webhook deliveries are being SSRF-blocked"
+          description: "A rule's webhook URL resolves to a private/loopback address; update the rule URL or add it to webhooks.ssrf.allow."

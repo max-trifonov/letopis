@@ -1,0 +1,75 @@
+# Load-test stack for S2-07: a from-source Letopis build plus its infrastructure
+# and a k6 runner, isolated from the dev/runtime compose files so a load run
+# never collides with a working stack.
+#
+#   make load-up                 # build + start service, Mongo, Redis
+#   make load-durable            # run the durable scenario through k6
+#   make load-fast | load-strict | load-overload
+#   make load-down               # tear down and drop volumes
+#
+# k6 runs as a one-shot container (docker compose run) on the same network, so
+# it reaches the service at http://letopis:8080. Results print to the console;
+# the JSON summary lands in test/load/results/ (mounted).
+
+services:
+  letopis:
+    build:
+      context: ../..
+      args:
+        VERSION: loadtest
+    pull_policy: build
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      LETOPIS_ROLE: all
+      LETOPIS_MONGODB_URI: mongodb://mongodb:27017
+      LETOPIS_REDIS_ADDR: redis:6379
+      LETOPIS_LOG_LEVEL: warn
+    volumes:
+      - ./config.load.yaml:/etc/letopis/config.yaml:ro
+    ports:
+      - "${LETOPIS_HTTP_PORT:-8080}:8080"
+      - "9091:8080"
+
+  mongodb:
+    image: mongo:${MONGO_VERSION:-7}
+    command: ["--quiet"]
+    volumes:
+      - mongo-data-load:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:${REDIS_VERSION:-7-alpine}
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis-data-load:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # One-shot k6 runner. The scenario script and target are passed at run time:
+  #   docker compose -f docker-compose.load.yml run --rm k6 run /scripts/durable.js
+  k6:
+    image: grafana/k6:${K6_VERSION:-latest}
+    profiles: ["k6"]
+    depends_on:
+      - letopis
+    environment:
+      LETOPIS_BASE_URL: http://letopis:8080
+      LETOPIS_WRITE_KEY: load_write_key
+    volumes:
+      - ./:/scripts:ro
+      - ./results:/results
+
+volumes:
+  mongo-data-load:
+  redis-data-load:

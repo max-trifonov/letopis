@@ -1,0 +1,9 @@
+.git
+.github
+bin
+config.yaml
+*.local.yaml
+*.md
+docker-compose*.yml
+Dockerfile
+.dockerignore

@@ -1,0 +1,3 @@
+# k6 summary output (gitignored); the committed baseline lives in docs/perf/.
+*
+!.gitignore

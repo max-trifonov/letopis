@@ -1,0 +1,25 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - gocritic
+    - misspell
+    - nolintlint
+    - unconvert
+  exclusions:
+    # Generated code is linted by its generators.
+    paths:
+      - internal/gen
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/max-trifonov/letopis
+  exclusions:
+    paths:
+      - internal/gen

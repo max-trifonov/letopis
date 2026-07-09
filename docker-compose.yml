@@ -1,0 +1,55 @@
+# Runtime stack: a released Letopis image plus its infrastructure.
+#
+#   cp config.example.yaml config.yaml   # adjust roles/TLS/logging
+#   docker compose up -d
+#
+# The compose file wires Mongo and Redis addresses over the config via
+# LETOPIS_* environment overrides, so config.yaml stays host-agnostic.
+# Until images are published to ghcr.io, build one locally:
+#   docker build -t ghcr.io/max-trifonov/letopis:latest .
+# or use docker-compose.dev.yml, which builds from source.
+
+services:
+  letopis:
+    image: ghcr.io/max-trifonov/letopis:${LETOPIS_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      LETOPIS_MONGODB_URI: mongodb://mongodb:27017
+      LETOPIS_REDIS_ADDR: redis:6379
+    volumes:
+      - ${LETOPIS_CONFIG:-./config.yaml}:/etc/letopis/config.yaml:ro
+    ports:
+      - "${LETOPIS_HTTP_PORT:-8080}:8080"
+      - "${LETOPIS_GRPC_PORT:-9090}:9090"
+
+  mongodb:
+    image: mongo:${MONGO_VERSION:-7}
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:${REDIS_VERSION:-7-alpine}
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  mongo-data:
+  redis-data:

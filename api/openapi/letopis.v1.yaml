@@ -1,0 +1,1005 @@
+openapi: 3.1.0
+info:
+  title: Letopis API
+  version: "1.0-draft"
+  description: >
+    Stage-1 (MVP) REST contract for Letopis — entity-history ingest and reads,
+    plus business activities and flows (FR-1, FR-3, FR-6, FR-7, FR-8). REST is
+    the canonical contract (ADR-005); gRPC mirrors it. This draft tracks the
+    endpoints implemented through stage 2 — including the async reliability modes
+    (durable/fast → 202 + ticket, FR-1.7/1.8); admin APIs and v1 flow filters
+    arrive later.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: ingest
+    description: Writes to entity history (FR-1).
+  - name: read
+    description: History and current-state reads (FR-3).
+  - name: flows
+    description: Activities and business flows (FR-8).
+  - name: admin
+    description: Collection configuration and administration (FR-6.1, NFR-5.2).
+paths:
+  /collections/{collection}/entities/{entityId}/state:
+    post:
+      tags: [ingest]
+      summary: Ingest a full state; the server derives the diff (FR-1.1)
+      parameters:
+        - $ref: "#/components/parameters/Collection"
+        - $ref: "#/components/parameters/EntityId"
+        - $ref: "#/components/parameters/Mode"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StateRequest" }
+      responses:
+        "201": { $ref: "#/components/responses/Written" }
+        "202": { $ref: "#/components/responses/Accepted" }
+        "200": { $ref: "#/components/responses/NoChanges" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /collections/{collection}/entities/{entityId}/diff:
+    post:
+      tags: [ingest]
+      summary: Ingest a ready-made diff (FR-1.2)
+      parameters:
+        - $ref: "#/components/parameters/Collection"
+        - $ref: "#/components/parameters/EntityId"
+        - $ref: "#/components/parameters/Mode"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DiffRequest" }
+      responses:
+        "201": { $ref: "#/components/responses/Written" }
+        "202": { $ref: "#/components/responses/Accepted" }
+        "200": { $ref: "#/components/responses/NoChanges" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /collections/{collection}/entities/{entityId}/delete:
+    post:
+      tags: [ingest]
+      summary: Record a deletion, preserving history (FR-1.3)
+      parameters:
+        - $ref: "#/components/parameters/Collection"
+        - $ref: "#/components/parameters/EntityId"
+        - $ref: "#/components/parameters/Mode"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeleteRequest" }
+      responses:
+        "201": { $ref: "#/components/responses/Written" }
+        "202": { $ref: "#/components/responses/Accepted" }
+        "200": { $ref: "#/components/responses/NoChanges" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /events:batch:
+    post:
+      tags: [ingest]
+      summary: Accept a batch of self-contained events, partial accept (FR-1.4)
+      description: >
+        Accepts up to 1000 self-contained events ({collection, entity_id, type,
+        payload}) in one request. The batch is not atomic: each element is
+        validated on its own, invalid ones are returned in rejected[] with their
+        index and a typed error, the rest are published like a single write. A
+        per-request X-Letopis-Mode override applies to every element. The response
+        carries one umbrella receipt (ticket_id) whose status is accepted when
+        every element was accepted, or partial when some were rejected; per-event
+        processing status is not tracked.
+      parameters:
+        - $ref: "#/components/parameters/Mode"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchRequest" }
+      responses:
+        "202":
+          description: The batch was accepted (possibly partially).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/TooLarge" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+  /collections/{collection}/entities/{entityId}/history:
+    get:
+      tags: [read]
+      summary: List an entity's history (FR-3.1)
+      parameters:
+        - $ref: "#/components/parameters/Collection"
+        - $ref: "#/components/parameters/EntityId"
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: author_id, in: query, schema: { type: string } }
+        - { name: op, in: query, schema: { $ref: "#/components/schemas/EntityOp" } }
+        - { name: path, in: query, schema: { type: string }, description: "Filter to events touching this field path or one nested under it." }
+        - { name: source, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string }, description: "Opaque pagination token from a prior next_cursor." }
+        - { name: order_by, in: query, schema: { type: string, enum: [version, ts_source, ts_received], default: version } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: desc } }
+        - { name: format, in: query, schema: { type: string, enum: [native, json-patch], default: native } }
+      responses:
+        "200":
+          description: A page of history.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HistoryResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /collections/{collection}/entities/{entityId}/state-read:
+    get:
+      tags: [read]
+      summary: Get an entity's current or point-in-time state (FR-3.3, FR-3.2)
+      description: >
+        Bound to GET on the same /state path as the ingest POST; listed under a
+        distinct key here only because OpenAPI keys paths by URL, and the GET
+        and POST share one. With no parameters it returns the current
+        materialized state (FR-3.3). With ?version or ?at (mutually exclusive) it
+        reconstructs the state as of that point (FR-3.2): the nearest snapshot at
+        or below the target plus the replayed event tail, reported in
+        reconstructed_from. ?at cuts by ts_received (the canonical version order,
+        ADR-011); ?at_source is reserved for ordering: source and rejected with
+        400 until that mode ships.
+      parameters:
+        - $ref: "#/components/parameters/Collection"
+        - $ref: "#/components/parameters/EntityId"
+        - name: version
+          in: query
+          description: Reconstruct the state at this version (clamped to the latest). Mutually exclusive with at.
+          schema: { type: integer, format: int64, minimum: 1 }
+        - name: at
+          in: query
+          description: Reconstruct the state as of this received-time cutoff (RFC3339). Mutually exclusive with version.
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: The current state, or a reconstructed point-in-time state.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/CurrentState" }
+                  - { $ref: "#/components/schemas/ReconstructedState" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /activities:
+    post:
+      tags: [flows]
+      summary: Record a business activity (FR-8.2)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActivityRequest" }
+      responses:
+        "201":
+          description: Activity recorded; ids are returned immediately.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ActivityResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /collections:
+    get:
+      tags: [read]
+      summary: List the tenant's collections with basic statistics (FR-3.6)
+      description: >
+        Returns every collection the key may see, narrowed by its collection
+        mask (FR-6.2), with cheap statistics — entity count (cur_* documents),
+        an estimated event count, and the newest event time — plus the effective
+        config (defaults applied). Auto-created collections (written without an
+        explicit PUT /config) are included. last_event_at is null for a
+        collection with no events.
+      responses:
+        "200":
+          description: The collection listing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CollectionsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /collections/{collection}/config:
+    parameters:
+      - $ref: "#/components/parameters/Collection"
+    get:
+      tags: [admin]
+      summary: Get a collection's configuration (FR-6.1)
+      description: >
+        Returns the collection's effective config (defaults applied) together
+        with a `defaults` array naming the fields that fell back to a default, so
+        a client can tell a configured value from an inherited one. Requires the
+        admin scope (NFR-5.2). A collection with no stored config is 404 — config
+        appears only via PUT or auto-create on first write.
+      responses:
+        "200":
+          description: The effective config with defaults marked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CollectionConfigResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [admin]
+      summary: Set a collection's configuration (FR-6.1)
+      description: >
+        Validates and persists the per-collection config, provisions the physical
+        collections (idempotent), invalidates the resolver cache so the new
+        settings take effect at once, and records the change in the tenant's audit
+        log (NFR-5.6). Omitted fields fall back to defaults; an unknown enum or a
+        non-positive number is 400. Requires the admin scope (NFR-5.2). The
+        collection name is taken from the path, never the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CollectionConfig" }
+      responses:
+        "200":
+          description: The effective config that took effect.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [config]
+                properties:
+                  config: { $ref: "#/components/schemas/CollectionConfig" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /collections/{collection}/rules:
+    parameters:
+      - $ref: "#/components/parameters/Collection"
+    post:
+      tags: [admin]
+      summary: Create a rule (FR-4.1)
+      description: >
+        Validates a rule by compiling its condition and checking its actions,
+        then stores it (id and version assigned). An invalid condition or action
+        is 400 with the offending field; a name already used in the collection is
+        409. Requires the admin scope (NFR-5.2). The collection is taken from the
+        path, never the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RuleRequest" }
+      responses:
+        "201":
+          description: The stored rule.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      tags: [admin]
+      summary: List a collection's rules (FR-4.1)
+      description: Requires the admin scope (NFR-5.2).
+      responses:
+        "200":
+          description: The collection's rules.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rules]
+                properties:
+                  rules:
+                    type: array
+                    items: { $ref: "#/components/schemas/Rule" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /collections/{collection}/rules/{ruleId}:
+    parameters:
+      - $ref: "#/components/parameters/Collection"
+      - { name: ruleId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [admin]
+      summary: Get a rule (FR-4.1)
+      responses:
+        "200":
+          description: The rule.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [admin]
+      summary: Update a rule (FR-4.1)
+      description: >
+        Replaces the rule's body and bumps its version. Same validation as create
+        (400 on a bad condition/action, 409 on a name clash); an unknown id is
+        404. The id is taken from the path, never the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RuleRequest" }
+      responses:
+        "200":
+          description: The updated rule (version bumped).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [admin]
+      summary: Delete a rule (FR-4.1)
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /collections/{collection}/rules/{ruleId}/dlq:
+    parameters:
+      - $ref: "#/components/parameters/Collection"
+      - { name: ruleId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [admin]
+      summary: List a rule's dead-lettered webhooks (FR-4.4)
+      description: >
+        Lists webhook deliveries that exhausted their retries (or could not be
+        attempted) for a rule, newest-first with cursor pagination. Requires the
+        admin scope: a dead-letter body may carry event PII (NFR-5.5). The
+        per-collection mask is enforced (FR-7.2).
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 1000 } }
+        - { name: cursor, in: query, schema: { type: string }, description: "Opaque; from a previous next_cursor." }
+      responses:
+        "200":
+          description: A page of dead letters.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/DeadLetter" }
+                  next_cursor:
+                    type: [string, "null"]
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /collections/{collection}/rules/{ruleId}/dlq:redeliver:
+    parameters:
+      - $ref: "#/components/parameters/Collection"
+      - { name: ruleId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [admin]
+      summary: Redeliver dead-lettered webhooks (FR-4.4)
+      description: >
+        Re-enqueues dead letters of the rule for another delivery attempt and
+        removes each from the DLQ on a successful re-enqueue. With a body of ids,
+        only those are redelivered (an unknown id is 404); with no body, every
+        dead letter of the rule is redelivered. At-least-once: a redelivery may
+        fail again and return to the DLQ. Requires the admin scope.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items: { type: string }
+                  description: "Optional; omit to redeliver all of the rule's dead letters."
+      responses:
+        "202":
+          description: Accepted; the count re-enqueued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requeued]
+                properties:
+                  requeued: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /tickets/{ticketId}:
+    get:
+      tags: [ingest]
+      summary: Get the status of an asynchronously accepted write (FR-1.8)
+      description: >
+        Returns the lifecycle state of a ticket issued by a 202 response
+        (durable/fast modes, S2-04). Tickets are tenant-scoped and expire after a
+        configurable TTL (default 24h); an unknown, expired, or out-of-scope id
+        is 404.
+      parameters:
+        - { name: ticketId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: The ticket's current status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ticket" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /flows/{flowId}:
+    get:
+      tags: [flows]
+      summary: Assemble a flow's nodes in received order (FR-8.3)
+      parameters:
+        - { name: flowId, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 100 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: A page of flow nodes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FlowResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Tenant API key (FR-7.1). The tenant is derived from the key, never the URL.
+  parameters:
+    Collection:
+      name: collection
+      in: path
+      required: true
+      description: Logical collection name, e.g. "crm.deals" (lowercase, dot-separated).
+      schema: { type: string, pattern: "^[a-z0-9]+(?:\\.[a-z0-9]+)*$" }
+    EntityId:
+      name: entityId
+      in: path
+      required: true
+      schema: { type: string }
+    Mode:
+      name: X-Letopis-Mode
+      in: header
+      required: false
+      description: >
+        Per-request reliability override (FR-1.7). Absent defers to the
+        collection's configured mode (default durable). strict returns 201 after
+        the write; durable/fast return 202 with a ticket.
+      schema: { type: string, enum: [strict, durable, fast] }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >
+        Idempotency key (FR-1.6), an alternative to the body's event_id. A repeat
+        with the same key replays the original response (the same 202 ticket, or a
+        200 duplicate) and writes nothing. The dedup window is configurable
+        (default 24h). When both this header and event_id are present, event_id
+        wins.
+      schema: { type: string }
+  responses:
+    Written:
+      description: Event appended.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/WriteResult" }
+    Accepted:
+      description: >
+        Accepted for asynchronous processing (durable/fast, FR-1.7). The body
+        carries a ticket id to poll via GET /tickets/{id}.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Accepted" }
+    NoChanges:
+      description: >
+        No event written: an identical state (no_changes), or a repeat caught by
+        the idempotency barrier whose original already landed (duplicate, FR-1.6).
+      content:
+        application/json:
+          schema:
+            type: object
+            properties: { status: { type: string, enum: [no_changes, duplicate] } }
+    TooManyRequests:
+      description: >
+        Queue at capacity (NFR-2.3) or MongoDB degraded with the async backlog at
+        its threshold (NFR-4.2). Retry after the indicated delay.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadRequest: { description: Malformed request., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Unauthorized: { description: Missing or invalid API key., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Forbidden: { description: Key lacks the scope or collection., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    NotFound: { description: Entity or collection not found., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Conflict: { description: expected_version did not match (FR-1.10)., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    TooLarge: { description: Event exceeds max_event_size_bytes (FR-1.9)., content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Unavailable: { description: "Async accept could not be queued; retry later (NFR-4.2).", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  schemas:
+    EntityOp:
+      type: string
+      enum: [create, update, delete]
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    WriteResult:
+      type: object
+      required: [entity_id, version, changes_count]
+      properties:
+        entity_id: { type: string }
+        version: { type: integer, format: int64 }
+        changes_count: { type: integer }
+    Accepted:
+      type: object
+      required: [ticket_id, status]
+      properties:
+        ticket_id: { type: string }
+        status: { type: string, const: accepted }
+    Ticket:
+      type: object
+      required: [ticket_id, status, created_at, updated_at]
+      description: Async-write ticket lifecycle (FR-1.8).
+      properties:
+        ticket_id: { type: string }
+        status: { type: string, enum: [accepted, processing, stored, failed, partial], description: "partial applies only to a batch receipt (S3-06)." }
+        entity_collection: { type: string }
+        entity_id: { type: string }
+        error: { type: string, description: "Reason, present only when status=failed." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    Change:
+      type: object
+      required: [path, op]
+      description: A single field change in the native diff format (ADR-004).
+      properties:
+        path: { type: string }
+        op: { type: string, enum: [add, change, remove] }
+        old: {}
+        new: {}
+    FlowRef:
+      type: object
+      description: >
+        A cause/reference edge. One of three shapes: an activity_id, or
+        collection+entity_id with version or event_id. Never validated —
+        dangling edges are allowed and resolved at read time (FR-8.1).
+      properties:
+        activity_id: { type: string }
+        collection: { type: string }
+        entity_id: { type: string }
+        version: { type: integer, format: int64 }
+        event_id: { type: string }
+    FlowBlock:
+      type: object
+      description: Optional business-flow block on a change event (FR-8.1).
+      properties:
+        flow_id: { type: string }
+        caused_by:
+          type: array
+          items: { $ref: "#/components/schemas/FlowRef" }
+        step: { type: string }
+    CommonWriteFields:
+      type: object
+      properties:
+        event_id: { type: string, description: "Client event id, for idempotency (FR-1.6); alternative to the Idempotency-Key header, which it overrides." }
+        author_id: { type: string }
+        source: { type: string }
+        ts_source: { type: string, format: date-time }
+        expected_version: { type: integer, format: int64, description: "Optimistic lock (Q-4)." }
+        meta: { type: object, additionalProperties: true }
+        flow: { $ref: "#/components/schemas/FlowBlock" }
+    StateRequest:
+      allOf:
+        - $ref: "#/components/schemas/CommonWriteFields"
+        - type: object
+          required: [state]
+          properties:
+            op: { $ref: "#/components/schemas/EntityOp" }
+            state: { type: object, additionalProperties: true }
+    DiffRequest:
+      allOf:
+        - $ref: "#/components/schemas/CommonWriteFields"
+        - type: object
+          properties:
+            op: { $ref: "#/components/schemas/EntityOp" }
+            state: { type: object, additionalProperties: true, description: "Allowed for op=create instead of changes." }
+            changes:
+              type: array
+              items: { $ref: "#/components/schemas/Change" }
+    DeleteRequest:
+      allOf:
+        - $ref: "#/components/schemas/CommonWriteFields"
+        - type: object
+          properties:
+            op: { type: string, const: delete }
+    BatchRequest:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/BatchItem" }
+    BatchItem:
+      type: object
+      required: [collection, entity_id, type, payload]
+      description: >
+        One self-contained event (FR-1.4). payload follows StateRequest,
+        DiffRequest or DeleteRequest according to type.
+      properties:
+        collection: { type: string }
+        entity_id: { type: string }
+        type: { type: string, enum: [state, diff, delete] }
+        payload: { type: object, additionalProperties: true }
+    BatchResponse:
+      type: object
+      required: [ticket_id, accepted, rejected]
+      properties:
+        ticket_id: { type: string, description: "Umbrella receipt for the batch (status accepted or partial)." }
+        accepted: { type: integer, description: "Count of elements accepted (includes idempotent duplicates)." }
+        rejected:
+          type: array
+          items: { $ref: "#/components/schemas/BatchReject" }
+    BatchReject:
+      type: object
+      required: [index, error]
+      properties:
+        index: { type: integer, description: "The rejected element's position in the request." }
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, description: "Machine-readable reason, e.g. invalid_type, too_large, version_conflict." }
+            message: { type: string }
+    HistoryEvent:
+      type: object
+      properties:
+        version: { type: integer, format: int64 }
+        op: { $ref: "#/components/schemas/EntityOp" }
+        ts_received: { type: string, format: date-time }
+        ts_stored: { type: string, format: date-time }
+        ts_source: { type: string, format: date-time }
+        author_id: { type: string }
+        source: { type: string }
+        meta: { type: object, additionalProperties: true }
+        integrity:
+          $ref: "#/components/schemas/Integrity"
+        changes:
+          type: array
+          items: {}
+          description: Native Change objects, or RFC 6902 ops when format=json-patch.
+    Integrity:
+      type: object
+      description: >
+        Per-entity hash-chain link (FR-5.3), present only when the hash_chain
+        plugin is enabled for the collection. hash = sha256(prev_hash ‖
+        canonical(event)); prev_hash of the first link is the collection genesis.
+      required: [hash]
+      properties:
+        hash: { type: string, example: "sha256:9f86d0…" }
+        prev_hash: { type: string, example: "sha256:2c2640…" }
+    HistoryResponse:
+      type: object
+      required: [entity_id, events, next_cursor]
+      properties:
+        entity_id: { type: string }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/HistoryEvent" }
+        next_cursor:
+          type: [string, "null"]
+          description: Token for the next page, or null when this is the last.
+    CurrentState:
+      type: object
+      required: [entity_id, version, ts, deleted, state]
+      properties:
+        entity_id: { type: string }
+        version: { type: integer, format: int64 }
+        ts: { type: string, format: date-time }
+        deleted: { type: boolean }
+        state: { type: object, additionalProperties: true }
+    ReconstructedState:
+      type: object
+      required: [entity_id, version, ts, deleted, state, reconstructed_from]
+      properties:
+        entity_id: { type: string }
+        version: { type: integer, format: int64 }
+        ts: { type: string, format: date-time }
+        deleted: { type: boolean }
+        state: { type: object, additionalProperties: true }
+        reconstructed_from:
+          type: object
+          required: [snapshot_version, events_applied]
+          properties:
+            snapshot_version:
+              type: integer
+              format: int64
+              nullable: true
+              description: The snapshot anchor used, or null when replayed from genesis.
+            events_applied:
+              type: integer
+              description: Number of tail events replayed onto the anchor.
+    CollectionsResponse:
+      type: object
+      required: [collections]
+      properties:
+        collections:
+          type: array
+          items: { $ref: "#/components/schemas/CollectionSummary" }
+    CollectionSummary:
+      type: object
+      required: [name, entities, events, last_event_at, config]
+      properties:
+        name: { type: string }
+        entities: { type: integer, format: int64, description: "Distinct entities (cur_* document count)." }
+        events: { type: integer, format: int64, description: "Estimated event count (ev_*)." }
+        last_event_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Newest event's stored time, or null when the collection has no events.
+        config: { $ref: "#/components/schemas/CollectionConfig" }
+    CollectionConfig:
+      type: object
+      description: Effective per-collection config with defaults applied (API §5). Read-only here; write is PUT /config.
+      required: [reliability_mode, snapshot_interval, retention, max_event_size_bytes, first_event_op, ordering]
+      properties:
+        reliability_mode: { type: string, enum: [strict, durable, fast] }
+        snapshot_interval: { type: integer }
+        retention:
+          type: object
+          required: [type]
+          properties:
+            type: { type: string, enum: [forever, days, versions] }
+            days: { type: integer }
+            keep: { type: integer }
+        max_event_size_bytes: { type: integer, format: int64 }
+        first_event_op: { type: string, enum: [create, update] }
+        ordering:
+          type: object
+          required: [mode]
+          properties:
+            mode: { type: string, enum: [received, source] }
+            reorder_window_ms: { type: integer }
+        array_keys:
+          type: object
+          additionalProperties: { type: string }
+        plugins:
+          type: object
+          description: >
+            Per-collection plugin config keyed by plugin name (FR-5.1/5.2), e.g.
+            "hash_chain". A plugin runs for the collection only when enabled.
+          additionalProperties: { $ref: "#/components/schemas/PluginConfig" }
+    PluginConfig:
+      type: object
+      description: One plugin's per-collection settings (FR-5.2/5.5).
+      properties:
+        enabled: { type: boolean }
+        fail_mode:
+          type: string
+          enum: [open, closed]
+          description: >
+            On a pre-store plugin error, open writes the event without the
+            plugin's contribution; closed rejects the write (FR-5.5).
+        params: { type: object, additionalProperties: true }
+    CollectionConfigResponse:
+      type: object
+      description: A collection's effective config plus the names of fields that are defaults (API §5, GET /config).
+      required: [config, defaults]
+      properties:
+        config: { $ref: "#/components/schemas/CollectionConfig" }
+        defaults:
+          type: array
+          description: Field names whose value is an applied default rather than a stored choice.
+          items: { type: string }
+    RuleRequest:
+      type: object
+      description: A rule to create or update (API §4, FR-4.1). The collection and, on update, the id come from the path, not the body.
+      required: [name, condition, actions]
+      properties:
+        name: { type: string, description: "Unique within the collection." }
+        enabled: { type: boolean, default: true }
+        condition: { $ref: "#/components/schemas/Condition" }
+        actions:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/Action" }
+    Rule:
+      type: object
+      description: A stored rule (FR-4.1).
+      required: [id, name, enabled, version, condition, actions]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        enabled: { type: boolean }
+        version: { type: integer, format: int64, description: "Monotonic; bumped on every change." }
+        updated_at: { type: string, format: date-time }
+        condition: { $ref: "#/components/schemas/Condition" }
+        actions:
+          type: array
+          items: { $ref: "#/components/schemas/Action" }
+    RuleResponse:
+      type: object
+      required: [rule]
+      properties:
+        rule: { $ref: "#/components/schemas/Rule" }
+    Condition:
+      type: object
+      description: >
+        One condition node (FR-4.2). A node is a combinator (all/any/not), a
+        scalar leaf (field plus exactly one operator key), or a change match
+        (field "changes" plus match). Operators on a scalar leaf:
+        eq/ne/in/gt/gte/lt/lte/regex/exists. An empty all is true, an empty any
+        is false.
+      properties:
+        all:
+          type: array
+          items: { $ref: "#/components/schemas/Condition" }
+        any:
+          type: array
+          items: { $ref: "#/components/schemas/Condition" }
+        not: { $ref: "#/components/schemas/Condition" }
+        field: { type: string, description: "Scalar leaf: op/entity_id/author_id/source. Change match: \"changes\"." }
+        eq: {}
+        ne: {}
+        in: { type: array, items: {} }
+        gt: { type: number }
+        gte: { type: number }
+        lt: { type: number }
+        lte: { type: number }
+        regex: { type: string }
+        exists: { type: boolean }
+        match: { $ref: "#/components/schemas/Match" }
+    Match:
+      type: object
+      description: A change-match leaf (FR-4.2). Holds when at least one diff element matches every set criterion. path is a glob with '*' matching one segment.
+      required: [path]
+      properties:
+        path: { type: string, description: "e.g. \"status\" or \"items.*.price\"." }
+        op: { type: string, enum: [add, change, remove], description: "Optional; filters by change kind." }
+        old: { description: "Optional; requires equality with the change's old value." }
+        new: { description: "Optional; requires equality with the change's new value." }
+    Action:
+      type: object
+      description: >
+        A reaction the rule fires (FR-4.3). webhook POSTs the triggering event to
+        a target; log writes a structured alert inline. A webhook request carries
+        the headers X-HM-Signature, X-HM-Delivery and X-HM-Rule (see DeadLetter)
+        and is signed HMAC-SHA256 over the exact request body: the header value is
+        "sha256=" + hex(HMAC-SHA256(secret, body)), the secret resolved from the
+        rule's secret_ref. Delivery is at-least-once with exponential backoff;
+        exhausted deliveries go to the rule's DLQ.
+      required: [type]
+      properties:
+        type: { type: string, enum: [webhook, log] }
+        url: { type: string, description: "webhook: target URL (required)." }
+        secret_ref: { type: string, description: "webhook: opaque handle to the signing secret (resolved from instance config)." }
+        timeout_ms: { type: integer }
+        retry:
+          type: object
+          properties:
+            max_attempts: { type: integer }
+            backoff: { type: string, enum: [exponential] }
+        level: { type: string, description: "log: severity level." }
+    DeadLetter:
+      type: object
+      description: >
+        A webhook delivery that exhausted its retries or could not be attempted
+        (FR-4.4), parked for an operator. delivery_id is stable across every
+        retry and is the X-HM-Delivery header value a receiver deduplicates on.
+        body is the exact JSON payload that was (to be) POSTed and signed.
+      required: [id, rule_id, collection, delivery_id, url, attempts, failed_at]
+      properties:
+        id: { type: string }
+        rule_id: { type: string }
+        collection: { type: string }
+        delivery_id: { type: string, description: "Stable across retries; sent as X-HM-Delivery." }
+        url: { type: string }
+        secret_ref: { type: string }
+        attempts: { type: integer, description: "How many delivery attempts were made before giving up." }
+        last_error: { type: string, description: "The final failure reason (status, timeout, unknown_secret)." }
+        failed_at: { type: string, format: date-time }
+        body: { description: "The signed request body (the history event plus the firing rule)." }
+    ActivityRequest:
+      type: object
+      properties:
+        activity_id: { type: string, description: "Optional; server mints one if absent." }
+        type: { type: string }
+        flow_id: { type: string, description: "Optional; a new flow is created if absent." }
+        author_id: { type: string }
+        source: { type: string }
+        ts_source: { type: string, format: date-time }
+        caused_by:
+          type: array
+          items: { $ref: "#/components/schemas/FlowRef" }
+        refs:
+          type: array
+          items: { $ref: "#/components/schemas/FlowRef" }
+        data: { type: object, additionalProperties: true }
+        meta: { type: object, additionalProperties: true }
+    ActivityResponse:
+      type: object
+      required: [activity_id, flow_id]
+      properties:
+        activity_id: { type: string }
+        flow_id: { type: string }
+    FlowNode:
+      type: object
+      required: [kind, ts_received]
+      properties:
+        kind: { type: string, enum: [event, activity] }
+        ts_received: { type: string, format: date-time }
+        caused_by:
+          type: array
+          items: { $ref: "#/components/schemas/FlowRef" }
+        collection: { type: string, description: "event nodes" }
+        entity_id: { type: string, description: "event nodes" }
+        version: { type: integer, format: int64, description: "event nodes" }
+        op: { $ref: "#/components/schemas/EntityOp" }
+        step: { type: string, description: "event nodes" }
+        activity_id: { type: string, description: "activity nodes" }
+        type: { type: string, description: "activity nodes" }
+        refs:
+          type: array
+          items: { $ref: "#/components/schemas/FlowRef" }
+        data: { type: object, additionalProperties: true, description: "activity nodes" }
+    FlowResponse:
+      type: object
+      required: [flow_id, nodes, next_cursor]
+      properties:
+        flow_id: { type: string }
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/FlowNode" }
+        next_cursor:
+          type: [string, "null"]

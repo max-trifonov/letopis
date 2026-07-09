@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package letopis.v1;
+
+option go_package = "github.com/max-trifonov/letopis/internal/gen/letopis/v1;letopisv1";
+
+// SystemService mirrors the service endpoints of the REST API.
+// Business services (ingest, history, activities) land in stage 1;
+// readiness is served by the standard grpc.health.v1 service.
+service SystemService {
+  rpc GetVersion(GetVersionRequest) returns (GetVersionResponse);
+}
+
+message GetVersionRequest {}
+
+message GetVersionResponse {
+  string version = 1;
+  string commit = 2;
+  string date = 3;
+}
