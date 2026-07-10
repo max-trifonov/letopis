@@ -211,7 +211,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger, reg *ext.Reg
 		dispatcher := delivery.New(deliveryQ, cfg.Webhooks.Secrets, deliveryConfig(cfg), dispatchOpts, log)
 		g.Go(func() error { return dispatcher.Run(ctx) })
 
-		dlqSampler := buildDLQSampler(dlqRepo, met, log)
+		dlqSampler := buildDLQSampler(dlqRepo, tenantsFromSpecs(cfg.TenantSpecs()), met, log)
 		g.Go(func() error { return dlqSampler.Run(ctx) })
 	}
 
@@ -325,8 +325,22 @@ func buildSSRFTransport(cfg *config.Config) (*delivery.GuardedTransport, error) 
 
 // buildDLQSampler returns a poller that periodically counts the DLQ and updates
 // the webhook_dlq_size gauge. The count is cheap (index scan on _dlq).
-func buildDLQSampler(repo domain.DLQRepository, met *metrics.Metrics, log *slog.Logger) *metrics.DLQSampler {
-	return metrics.NewDLQSampler(repo, met, log)
+func buildDLQSampler(repo domain.DLQRepository, tenants []tenant.Tenant, met *metrics.Metrics, log *slog.Logger) *metrics.DLQSampler {
+	return metrics.NewDLQSampler(repo, tenants, met, log)
+}
+
+// tenantsFromSpecs strips specs down to what the DLQ sampler needs to build
+// a tenant context per tenant (id + optional per-tenant database override) —
+// it has no business seeing key material.
+func tenantsFromSpecs(specs []tenant.Spec) []tenant.Tenant {
+	tenants := make([]tenant.Tenant, 0, len(specs))
+	for _, s := range specs {
+		tenants = append(tenants, tenant.Tenant{
+			ID:       s.ID,
+			Database: tenant.Database{URI: s.DBURI, Name: s.DBName},
+		})
+	}
+	return tenants
 }
 
 // buildSampler wires the depth sampler over the queues this process holds.

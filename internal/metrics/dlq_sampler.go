@@ -6,23 +6,30 @@ import (
 	"time"
 
 	"github.com/max-trifonov/letopis/internal/domain"
+	"github.com/max-trifonov/letopis/internal/tenant"
 )
 
 const defaultDLQSampleInterval = 15 * time.Second
 
-// DLQSampler periodically counts the dead-letter queue and publishes the
-// webhook_dlq_size gauge. Runs in the worker role alongside the queue-depth
-// sampler.
+// DLQSampler periodically counts the dead-letter queue across every
+// configured tenant and publishes the total on the webhook_dlq_size gauge.
+// Runs in the worker role alongside the queue-depth sampler.
 type DLQSampler struct {
 	repo     domain.DLQRepository
+	tenants  []tenant.Tenant
 	met      *Metrics
 	log      *slog.Logger
 	interval time.Duration
 }
 
-func NewDLQSampler(repo domain.DLQRepository, met *Metrics, log *slog.Logger) *DLQSampler {
+// NewDLQSampler builds a sampler over the given tenants. DLQRepository.Count
+// resolves its database from a tenant in ctx (ADR-010: one database per
+// tenant), so the sampler must supply one context per tenant rather than a
+// single bare context — there is no "default tenant" to fall back to.
+func NewDLQSampler(repo domain.DLQRepository, tenants []tenant.Tenant, met *Metrics, log *slog.Logger) *DLQSampler {
 	return &DLQSampler{
 		repo:     repo,
+		tenants:  tenants,
 		met:      met,
 		log:      log.With("component", "dlq-sampler"),
 		interval: defaultDLQSampleInterval,
@@ -44,11 +51,18 @@ func (s *DLQSampler) Run(ctx context.Context) error {
 	}
 }
 
+// sample sums the DLQ size across every configured tenant. One tenant's
+// failure is logged and skipped so it does not blind the gauge for the rest.
 func (s *DLQSampler) sample(ctx context.Context) {
-	n, err := s.repo.Count(ctx, "")
-	if err != nil {
-		s.log.Warn("dlq count failed", "err", err)
-		return
+	var total int64
+	for _, t := range s.tenants {
+		tctx := tenant.NewContext(ctx, tenant.Principal{Tenant: t})
+		n, err := s.repo.Count(tctx, "")
+		if err != nil {
+			s.log.Warn("dlq count failed", "tenant", t.ID, "err", err)
+			continue
+		}
+		total += n
 	}
-	s.met.SetDLQSize(float64(n))
+	s.met.SetDLQSize(float64(total))
 }
